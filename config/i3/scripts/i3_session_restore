@@ -10,42 +10,16 @@ import sys
 SESSION_FILE = os.path.expanduser('~/.config/i3/session/windows.json')
 FLAG_FILE = os.path.expanduser('~/.config/i3/session/.restored')
 
-# Known app classes → launch commands (fallback when exe path is unavailable)
-KNOWN_APPS = {
-    'firefox':        'firefox',
-    'firefox-esr':    'firefox-esr',
-    'chromium':       'chromium',
-    'google-chrome':  'google-chrome',
-    'thunar':         'thunar',
-    'nautilus':       'nautilus',
-    'geany':          'geany',
-    'code':           'code',
-    'obsidian':       'obsidian',
-    'kitty':          'kitty',
-    'alacritty':      'alacritty',
-    'xterm':          'xterm',
-    'burpsuite':      '/home/kali/BurpSuitePro/BurpSuite',
-}
-
-
 def get_launch_cmd(win):
-    wm_class = (win.get('class') or '').lower()
-    instance = (win.get('instance') or '').lower()
-
-    # Prefer known mapping
-    for key in (wm_class, instance):
-        if key in KNOWN_APPS:
-            return KNOWN_APPS[key]
-
-    # Use saved exe if it still exists and is executable
+    # Use the exe path saved from /proc at session-save time
     exe = win.get('exe', '')
     if exe and os.path.isfile(exe) and os.access(exe, os.X_OK):
         return exe
 
-    # Try class/instance name as a PATH command
-    for cmd in (wm_class, instance):
-        if cmd:
-            r = subprocess.run(['which', cmd], capture_output=True, text=True)
+    # Fall back to looking up the class/instance name on PATH
+    for name in (win.get('class') or '', win.get('instance') or ''):
+        if name:
+            r = subprocess.run(['which', name.lower()], capture_output=True, text=True)
             if r.returncode == 0:
                 return r.stdout.strip()
 
