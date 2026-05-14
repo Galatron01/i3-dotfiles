@@ -50,3 +50,6 @@ hsetroot -cover "$idir"/theme/wallpaper
 
 # Start mpd
 exec mpd &
+
+# Restore previous session (runs once per login; skipped on i3 restart)
+"$idir"/scripts/i3_session_restore &

@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Save current i3 session: workspaces, apps, and floating window geometry."""
+
+import json
+import os
+import subprocess
+import sys
+
+
+def get_exe(pid):
+    if not pid:
+        return None
+    try:
+        return os.readlink(f'/proc/{pid}/exe')
+    except OSError:
+        pass
+    try:
+        with open(f'/proc/{pid}/cmdline', 'rb') as f:
+            parts = f.read().split(b'\x00')
+            if parts and parts[0]:
+                return parts[0].decode('utf-8', errors='replace')
+    except OSError:
+        pass
+    return None
+
+
+# Window classes that are background/system processes — do not save
+SKIP_CLASSES = {
+    '', 'picom', 'dunst', 'polybar', 'i3bar', 'xsettingsd',
+    'ksuperkey', 'xfce-polkit', 'xfce4-power-manager', 'hsetroot',
+    'mpd', 'trayer', 'stalonetray', 'nm-applet',
+}
+
+
+def extract_windows(node, workspace=None, results=None):
+    if results is None:
+        results = []
+
+    ntype = node.get('type', '')
+    if ntype == 'workspace' and not node.get('name', '').startswith('__'):
+        workspace = node['name']
+
+    if node.get('window') is not None and workspace is not None:
+        props = node.get('window_properties', {})
+        wm_class = props.get('class', '')
+
+        if wm_class.lower() not in SKIP_CLASSES:
+            pid = node.get('pid')
+            rect = node.get('rect', {})
+            is_floating = node.get('floating', '') in ('user_on', 'auto_on')
+
+            results.append({
+                'workspace': workspace,
+                'class': wm_class,
+                'instance': props.get('instance', ''),
+                'pid': pid,
+                'exe': get_exe(pid) if pid else None,
+                'x': rect.get('x', 0),
+                'y': rect.get('y', 0),
+                'width': rect.get('width', 0),
+                'height': rect.get('height', 0),
+                'floating': is_floating,
+            })
+
+    for child in node.get('nodes', []) + node.get('floating_nodes', []):
+        extract_windows(child, workspace, results)
+
+    return results
+
+
+def main():
+    result = subprocess.run(
+        ['i3-msg', '-t', 'get_tree'],
+        capture_output=True, text=True, check=True
+    )
+    tree = json.loads(result.stdout)
+    windows = extract_windows(tree)
+
+    session_dir = os.path.expanduser('~/.config/i3/session')
+    os.makedirs(session_dir, exist_ok=True)
+
+    session_file = os.path.join(session_dir, 'windows.json')
+    with open(session_file, 'w') as f:
+        json.dump({'version': 1, 'windows': windows}, f, indent=2)
+
+    # Remove restore flag so the next login triggers a restore
+    flag = os.path.join(session_dir, '.restored')
+    try:
+        os.remove(flag)
+    except FileNotFoundError:
+        pass
+
+    subprocess.run([
+        'dunstify', '-u', 'low', '-i', 'system-log-out',
+        'Session Saved', f'Saved {len(windows)} open windows',
+    ], check=False)
+
+
+if __name__ == '__main__':
+    main()
